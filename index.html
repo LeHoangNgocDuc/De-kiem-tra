@@ -7,7 +7,11 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script>
     MathJax = {
-        tex: { inlineMath: [['$', '$'], ['\\(', '\\)']] },
+        tex: { 
+            inlineMath: [['$', '$'], ['\\(', '\\)']],
+            displayMath: [['$$', '$$'], ['\\[', '\\]']],
+            processEscapes: true
+        },
         svg: { fontCache: 'global' }
     };
     </script>
@@ -17,7 +21,7 @@
         .quiz-card { background: white; border-radius: 12px; padding: 25px; margin-bottom: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
         .q-header { border-left: 5px solid #0d6efd; padding-left: 15px; margin-bottom: 20px; }
         .q-title { font-weight: 700; color: #2c3e50; font-size: 1.1rem; }
-        .btn-option { width: 100%; text-align: left; margin: 5px 0; padding: 12px; border: 1px solid #dee2e6; border-radius: 8px; transition: 0.2s; background: white; }
+        .btn-option { width: 100%; text-align: left; margin: 5px 0; padding: 12px; border: 1px solid #dee2e6; border-radius: 8px; transition: 0.2s; background: white; cursor: pointer; }
         .btn-option:hover { background: #f8f9fa; border-color: #adb5bd; }
         .btn-option.selected { background: #e7f1ff; border-color: #0d6efd; color: #0d6efd; font-weight: bold; }
         .solution-area { display: none; margin-top: 15px; padding: 20px; background: #e8f5e9; border-radius: 8px; border: 1px dashed #198754; }
@@ -35,13 +39,26 @@
 <script>
     const FILE_MD = 'ketqua.md';
 
-    // Hàm làm sạch văn bản (Xóa rác Pandoc)
-    function cleanMarkdown(text) {
+    // --- BỘ LỌC QUAN TRỌNG: SỬA LỖI PANDOC ---
+    function superClean(text) {
         if (!text) return "";
         return text
-            .replace(/^[\s\t]*[>|]\s*/gm, '') // Xóa dấu > và | ở đầu dòng
-            .replace(/^\s*\+[-]+\+\s*$/gm, '') // Xóa dòng kẻ bảng +-----+
-            .replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1">') // Chuyển ảnh
+            // 1. SỬA LỖI TOÁN (Quan trọng nhất)
+            // Đổi \$ thành $ (để MathJax hiểu)
+            .replace(/\\\$/g, '$')
+            // Đổi \\ thành \ (để các lệnh như \left, \frac hoạt động)
+            .replace(/\\\\/g, '\\') 
+            // Đổi \[ và \] thành $$ để hiển thị công thức căn giữa
+            .replace(/\\\[/g, '$$').replace(/\\\]/g, '$$')
+
+            // 2. SỬA LỖI ĐÁP ÁN DÍNH CHÙM
+            // Tìm bất kỳ chỗ nào có dạng " A." hoặc "**A.**" mà đang nằm giữa dòng -> Đẩy xuống dòng
+            .replace(/(\s+)(\*\*|__)?([A-D])(\.|:|\))(?:\*\*|__)?/g, '\n$3.')
+
+            // 3. DỌN RÁC KHÁC
+            .replace(/^[\s\t]*[>|]\s*/gm, '') // Xóa dấu > thừa
+            .replace(/^\s*\+[-]+\+\s*$/gm, '') // Xóa dòng kẻ bảng
+            .replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1">') // Ảnh
             .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>') // In đậm
             .replace(/\*(.*?)\*/g, '<em>$1</em>'); // In nghiêng
     }
@@ -55,18 +72,16 @@
             if (!res.ok) throw new Error(`Không đọc được file ${FILE_MD}`);
             let text = await res.text();
             
-            // Bước 1: Dọn rác toàn bộ file trước
-            text = cleanMarkdown(text);
+            // Bước 1: Chạy bộ lọc sửa lỗi
+            text = superClean(text);
 
-            // Bước 2: Tách câu hỏi bằng công nghệ mới
-            // Logic: Tìm dòng bắt đầu bằng số (1.), hoặc chữ Câu (Câu 1.), hoặc Bài (Bài 1.)
-            // Regex này cực mạnh, chấp nhận cả dấu * hoặc khoảng trắng thừa
+            // Bước 2: Tách câu hỏi
+            // Regex tìm: Đầu dòng -> (có thể có Câu/Bài) -> Số -> Dấu chấm/hai chấm
             const questionRegex = /(?:^|\n)\s*(?:(?:\*\*|__)?(?:Câu|Bài)\s+)?(\d+)[\.:]\s+/i;
 
             const rawParts = text.split(questionRegex);
             const questions = [];
 
-            // rawParts sẽ có dạng: [Intro, "1", "Nội dung câu 1...", "2", "Nội dung câu 2..."]
             for (let i = 1; i < rawParts.length; i += 2) {
                 const qNum = rawParts[i]; 
                 const qBody = rawParts[i+1];
@@ -76,7 +91,7 @@
             }
 
             if (questions.length === 0) {
-                throw new Error("Vẫn chưa tìm thấy câu hỏi. Có thể file MD quá lạ.");
+                throw new Error("Không tìm thấy câu hỏi. Hãy kiểm tra lại file MD.");
             }
 
             loading.style.display = 'none';
@@ -99,21 +114,28 @@
                         return; 
                     }
 
-                    // Nhận diện Đáp án A. B. C. D. 
-                    // (Đã nâng cấp để nhận diện cả khi đáp án nằm trong thẻ in đậm **A.**)
+                    // Nhận diện Đáp án A. B. C. D. (Đã được bộ lọc đẩy xuống đầu dòng)
                     const optMatch = line.match(/^\s*(?:\*\*)?([A-D])(?:\.|:|\))(?:\*\*)?\s*(.*)/);
+                    
                     if (!isSolution && optMatch) {
-                        // optMatch[1] là A,B,C... optMatch[2] là nội dung
                         options.push({ label: optMatch[1], val: optMatch[2] });
                     } 
-                    // Nội dung khác
                     else {
                         if (isSolution) solution += line + "<br>";
-                        else content += line + "<br>";
+                        else content += line + " "; // Nối các dòng câu hỏi lại cho liền mạch
                     }
                 });
 
-                // Render HTML
+                // Nếu không tìm thấy đáp án (vẫn bị lỗi), thử hiển thị cảnh báo
+                let optionsHtml = '';
+                if (options.length > 0) {
+                    optionsHtml = options.map(opt => 
+                        `<div class="col-md-6"><button class="btn-option" onclick="showSol(this, ${index})"><strong>${opt.label}.</strong> ${opt.val}</button></div>`
+                    ).join('');
+                } else {
+                    optionsHtml = '<div class="col-12 text-muted fst-italic">Không tách được đáp án (Kiểm tra lại format).</div>';
+                }
+
                 const card = document.createElement('div');
                 card.className = 'quiz-card';
                 card.innerHTML = `
@@ -121,22 +143,16 @@
                         <div class="q-title">Câu ${q.num}</div>
                         <div class="mt-2">${content}</div>
                     </div>
-                    <div class="row">
-                        ${options.map(opt => {
-                            return `<div class="col-md-6">
-                                <button class="btn-option" onclick="showSol(this, ${index})">
-                                    <strong>${opt.label}.</strong> ${opt.val}
-                                </button>
-                            </div>`
-                        }).join('')}
-                    </div>
+                    <div class="row">${optionsHtml}</div>
                     <div id="sol-${index}" class="solution-area">
                         <strong>💡 Hướng dẫn giải:</strong><br>${solution || 'Không có lời giải chi tiết.'}
                     </div>
                 `;
                 container.appendChild(card);
             });
-            MathJax.typeset(); 
+            
+            // Vẽ lại công thức toán
+            MathJax.typesetPromise(); 
 
         } catch (err) {
             loading.innerHTML = `<div class="error-msg">${err.message}</div>`;
@@ -145,7 +161,9 @@
     
     function showSol(btn, id) {
         let parent = btn.closest('.row');
-        parent.querySelectorAll('.btn-option').forEach(b => b.classList.remove('selected'));
+        if(parent) {
+            parent.querySelectorAll('.btn-option').forEach(b => b.classList.remove('selected'));
+        }
         btn.classList.add('selected');
         document.getElementById(`sol-${id}`).style.display = 'block';
     }
