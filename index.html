@@ -22,6 +22,7 @@
         .btn-option.selected { background: #e7f1ff; border-color: #0d6efd; color: #0d6efd; font-weight: bold; }
         .solution-area { display: none; margin-top: 15px; padding: 20px; background: #e8f5e9; border-radius: 8px; border: 1px dashed #198754; }
         img { max-width: 100%; height: auto; border-radius: 5px; margin: 10px 0; display: block; }
+        .error-msg { color: red; font-weight: bold; padding: 20px; text-align: center; }
     </style>
 </head>
 <body>
@@ -32,51 +33,76 @@
 </div>
 
 <script>
-    // 1. Cấu hình file
     const FILE_MD = 'ketqua.md';
 
-    // 2. Hàm xử lý Markdown sang HTML (Chuyển ảnh và công thức)
     function cleanMarkdown(text) {
-        // Chuyển cú pháp ảnh pandoc ![](path) thành thẻ <img>
-        text = text.replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1">');
-        return text;
+        // Chuyển ảnh pandoc và các ký tự markdown cơ bản
+        return text
+            .replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1">') // Ảnh
+            .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>') // In đậm
+            .replace(/\*(.*?)\*/g, '<em>$1</em>'); // In nghiêng
     }
 
-    // 3. Logic chính
     async function loadQuiz() {
+        const container = document.getElementById('quiz-container');
+        const loading = document.getElementById('loading');
+        
         try {
+            // 1. Tải file
             const res = await fetch(FILE_MD);
-            if (!res.ok) throw new Error('Không đọc được file đề thi (Lỗi ' + res.status + ')');
+            if (!res.ok) {
+                throw new Error(`Không tìm thấy file "${FILE_MD}". Bạn hãy kiểm tra kỹ tên file trên GitHub (chữ hoa/thường phải chính xác).`);
+            }
             const text = await res.text();
             
-            // Tách câu hỏi dựa vào regex "Câu X" hoặc "Bài X"
-            // Lưu ý: Regex này phụ thuộc vào format file Word của bạn
-            const rawQuestions = text.split(/(?:^|\n)(?=#{1,3}\s+(?:Câu|Bài)\s+\d+)/i).slice(1);
+            // 2. Tách câu hỏi (Logic mới: Dễ tính hơn)
+            // Tìm bất kỳ dòng nào bắt đầu bằng: (Dấu # tùy ý) + (In đậm tùy ý) + Chữ "Câu" hoặc "Bài" + Số
+            const questionRegex = /(?:^|\n)(?:#{1,6}\s+|(?:\*\*|__)|)(?:Câu|Bài)\s+(\d+)/i;
             
-            const container = document.getElementById('quiz-container');
-            document.getElementById('loading').style.display = 'none';
+            // Tách dựa trên Regex này
+            const rawParts = text.split(questionRegex);
+            // rawParts[0] là phần mở đầu thừa, các phần sau đan xen: [Nội dung câu 1, Số thứ tự câu 2, Nội dung câu 2...]
+            
+            // Lọc và ghép lại cấu trúc
+            const questions = [];
+            let currentQ = null;
 
-            rawQuestions.forEach((qText, index) => {
-                const lines = qText.trim().split('\n');
-                let title = lines[0].replace(/#{1,3}/g, '').trim(); // Lấy dòng tiêu đề (bỏ dấu #)
+            // Vì split bằng regex có capture group (\d+), mảng sẽ có dạng: [Intro, "1", "Nội dung câu 1...", "2", "Nội dung câu 2..."]
+            for (let i = 1; i < rawParts.length; i += 2) {
+                const qNum = rawParts[i];      // Số thứ tự (ví dụ: 1)
+                const qBody = rawParts[i+1];   // Nội dung câu hỏi
+                
+                if(qBody) {
+                    questions.push({ num: qNum, text: qBody });
+                }
+            }
+
+            if (questions.length === 0) {
+                throw new Error("Đã đọc được file nhưng không tìm thấy câu hỏi nào bắt đầu bằng 'Câu X'. Hãy kiểm tra file MD.");
+            }
+
+            loading.style.display = 'none';
+
+            // 3. Xử lý từng câu hỏi
+            questions.forEach((q, index) => {
+                const lines = q.text.trim().split('\n');
                 let content = "";
                 let options = [];
                 let solution = "";
                 let isSolution = false;
 
-                // Phân tích từng dòng
-                for (let i = 1; i < lines.length; i++) {
-                    let line = lines[i].trim();
-                    if (!line) continue;
+                lines.forEach(line => {
+                    line = line.trim();
+                    if (!line) return;
 
                     // Nhận diện Lời giải
-                    if (line.match(/^Lời giải/i) || line.match(/^Hướng dẫn/i)) {
+                    if (line.match(/^(?:Lời giải|Hướng dẫn)/i)) {
                         isSolution = true;
-                        continue; 
+                        return; 
                     }
 
-                    // Nhận diện Đáp án A. B. C. D.
-                    if (!isSolution && line.match(/^[A-D]\./)) {
+                    // Nhận diện Đáp án A. B. C. D. (Chấp nhận cả A., A), **A.**...)
+                    if (!isSolution && line.match(/^(?:(?:\*\*|__)?(?:[A-D])(?:\.|:|\)))(.*)/)) {
                         options.push(cleanMarkdown(line));
                     } 
                     // Nội dung khác
@@ -84,21 +110,21 @@
                         if (isSolution) solution += cleanMarkdown(line) + "<br>";
                         else content += cleanMarkdown(line) + "<br>";
                     }
-                }
+                });
 
                 // Render HTML
                 const card = document.createElement('div');
                 card.className = 'quiz-card';
                 card.innerHTML = `
                     <div class="q-header">
-                        <div class="q-title">${title}</div>
+                        <div class="q-title">Câu ${q.num}</div>
                         <div class="mt-2">${content}</div>
                     </div>
                     <div class="row">
                         ${options.map(opt => {
-                            let label = opt.substring(0, 2); // A.
-                            let val = opt.substring(2);
-                            return `<div class="col-md-6"><button class="btn-option" onclick="showSol(this, ${index})"><strong>${label}</strong> ${val}</button></div>`
+                            // Làm sạch label đáp án để hiển thị đẹp
+                            let cleanOpt = opt.replace(/^(\*\*|__)?([A-D])(\.|:|\))(\*\*|__)?/, '<strong>$2.</strong>');
+                            return `<div class="col-md-6"><button class="btn-option" onclick="showSol(this, ${index})">${cleanOpt}</button></div>`
                         }).join('')}
                     </div>
                     <div id="sol-${index}" class="solution-area">
@@ -107,26 +133,22 @@
                 `;
                 container.appendChild(card);
             });
-            MathJax.typeset(); // Vẽ lại công thức toán
+            MathJax.typeset(); 
+
         } catch (err) {
-            document.getElementById('loading').innerHTML = `
-                <div class="alert alert-warning">
-                    <strong>Chưa xem được ngay đâu!</strong><br>
-                    Trình duyệt chặn đọc file từ ổ cứng.<br>
-                    👉 Bạn hãy upload cả thư mục này lên GitHub Pages để chạy nhé.
-                </div>`;
+            loading.innerHTML = `<div class="error-msg">${err.message}</div>`;
+            console.error(err);
         }
     }
-    loadQuiz();
-
+    
     function showSol(btn, id) {
-        // Hiệu ứng chọn
         let parent = btn.closest('.row');
         parent.querySelectorAll('.btn-option').forEach(b => b.classList.remove('selected'));
         btn.classList.add('selected');
-        // Hiện lời giải
         document.getElementById(`sol-${id}`).style.display = 'block';
     }
+
+    loadQuiz();
 </script>
 </body>
 </html>
