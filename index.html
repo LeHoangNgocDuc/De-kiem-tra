@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kiểm Tra Toán 10</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script>
+    MathJax = {
+        tex: { inlineMath: [['$', '$'], ['\\(', '\\)']] },
+        svg: { fontCache: 'global' }
+    };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        body { background: #f0f2f5; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .quiz-card { background: white; border-radius: 12px; padding: 25px; margin-bottom: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        .q-header { border-left: 5px solid #0d6efd; padding-left: 15px; margin-bottom: 20px; }
+        .q-title { font-weight: 700; color: #2c3e50; font-size: 1.1rem; }
+        .btn-option { width: 100%; text-align: left; margin: 5px 0; padding: 12px; border: 1px solid #dee2e6; border-radius: 8px; transition: 0.2s; background: white; }
+        .btn-option:hover { background: #f8f9fa; border-color: #adb5bd; }
+        .btn-option.selected { background: #e7f1ff; border-color: #0d6efd; color: #0d6efd; font-weight: bold; }
+        .solution-area { display: none; margin-top: 15px; padding: 20px; background: #e8f5e9; border-radius: 8px; border: 1px dashed #198754; }
+        img { max-width: 100%; height: auto; border-radius: 5px; margin: 10px 0; display: block; }
+    </style>
+</head>
+<body>
+<div class="container py-5" style="max-width: 800px;">
+    <h1 class="text-center mb-5 fw-bold text-primary">ĐỀ KIỂM TRA TOÁN</h1>
+    <div id="loading" class="text-center text-muted">Đang tải dữ liệu...</div>
+    <div id="quiz-container"></div>
+</div>
+
+<script>
+    // 1. Cấu hình file
+    const FILE_MD = 'ketqua.md';
+
+    // 2. Hàm xử lý Markdown sang HTML (Chuyển ảnh và công thức)
+    function cleanMarkdown(text) {
+        // Chuyển cú pháp ảnh pandoc ![](path) thành thẻ <img>
+        text = text.replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1">');
+        return text;
+    }
+
+    // 3. Logic chính
+    async function loadQuiz() {
+        try {
+            const res = await fetch(FILE_MD);
+            if (!res.ok) throw new Error('Không đọc được file đề thi (Lỗi ' + res.status + ')');
+            const text = await res.text();
+            
+            // Tách câu hỏi dựa vào regex "Câu X" hoặc "Bài X"
+            // Lưu ý: Regex này phụ thuộc vào format file Word của bạn
+            const rawQuestions = text.split(/(?:^|\n)(?=#{1,3}\s+(?:Câu|Bài)\s+\d+)/i).slice(1);
+            
+            const container = document.getElementById('quiz-container');
+            document.getElementById('loading').style.display = 'none';
+
+            rawQuestions.forEach((qText, index) => {
+                const lines = qText.trim().split('\n');
+                let title = lines[0].replace(/#{1,3}/g, '').trim(); // Lấy dòng tiêu đề (bỏ dấu #)
+                let content = "";
+                let options = [];
+                let solution = "";
+                let isSolution = false;
+
+                // Phân tích từng dòng
+                for (let i = 1; i < lines.length; i++) {
+                    let line = lines[i].trim();
+                    if (!line) continue;
+
+                    // Nhận diện Lời giải
+                    if (line.match(/^Lời giải/i) || line.match(/^Hướng dẫn/i)) {
+                        isSolution = true;
+                        continue; 
+                    }
+
+                    // Nhận diện Đáp án A. B. C. D.
+                    if (!isSolution && line.match(/^[A-D]\./)) {
+                        options.push(cleanMarkdown(line));
+                    } 
+                    // Nội dung khác
+                    else {
+                        if (isSolution) solution += cleanMarkdown(line) + "<br>";
+                        else content += cleanMarkdown(line) + "<br>";
+                    }
+                }
+
+                // Render HTML
+                const card = document.createElement('div');
+                card.className = 'quiz-card';
+                card.innerHTML = `
+                    <div class="q-header">
+                        <div class="q-title">${title}</div>
+                        <div class="mt-2">${content}</div>
+                    </div>
+                    <div class="row">
+                        ${options.map(opt => {
+                            let label = opt.substring(0, 2); // A.
+                            let val = opt.substring(2);
+                            return `<div class="col-md-6"><button class="btn-option" onclick="showSol(this, ${index})"><strong>${label}</strong> ${val}</button></div>`
+                        }).join('')}
+                    </div>
+                    <div id="sol-${index}" class="solution-area">
+                        <strong>💡 Hướng dẫn giải:</strong><br>${solution || 'Không có lời giải chi tiết.'}
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+            MathJax.typeset(); // Vẽ lại công thức toán
+        } catch (err) {
+            document.getElementById('loading').innerHTML = `
+                <div class="alert alert-warning">
+                    <strong>Chưa xem được ngay đâu!</strong><br>
+                    Trình duyệt chặn đọc file từ ổ cứng.<br>
+                    👉 Bạn hãy upload cả thư mục này lên GitHub Pages để chạy nhé.
+                </div>`;
+        }
+    }
+    loadQuiz();
+
+    function showSol(btn, id) {
+        // Hiệu ứng chọn
+        let parent = btn.closest('.row');
+        parent.querySelectorAll('.btn-option').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+        // Hiện lời giải
+        document.getElementById(`sol-${id}`).style.display = 'block';
+    }
+</script>
+</body>
+</html>
