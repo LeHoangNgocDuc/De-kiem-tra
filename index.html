@@ -3,57 +3,154 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Debug Toán 10</title>
+    <title>Kiểm Tra Toán 10</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script>
+    MathJax = {
+        tex: { inlineMath: [['$', '$'], ['\\(', '\\)']] },
+        svg: { fontCache: 'global' }
+    };
+    </script>
     <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <style>
-        body { padding: 20px; background: #fff; }
-        #debug-box {
-            background: #2d2d2d; color: #76ff03; 
-            padding: 20px; font-family: monospace; 
-            white-space: pre-wrap; border-radius: 10px;
-            margin-top: 20px; border: 2px solid red;
-        }
+        body { background: #f0f2f5; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .quiz-card { background: white; border-radius: 12px; padding: 25px; margin-bottom: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        .q-header { border-left: 5px solid #0d6efd; padding-left: 15px; margin-bottom: 20px; }
+        .q-title { font-weight: 700; color: #2c3e50; font-size: 1.1rem; }
+        .btn-option { width: 100%; text-align: left; margin: 5px 0; padding: 12px; border: 1px solid #dee2e6; border-radius: 8px; transition: 0.2s; background: white; }
+        .btn-option:hover { background: #f8f9fa; border-color: #adb5bd; }
+        .btn-option.selected { background: #e7f1ff; border-color: #0d6efd; color: #0d6efd; font-weight: bold; }
+        .solution-area { display: none; margin-top: 15px; padding: 20px; background: #e8f5e9; border-radius: 8px; border: 1px dashed #198754; }
+        img { max-width: 100%; height: auto; border-radius: 5px; margin: 10px 0; display: block; }
+        .error-msg { color: red; font-weight: bold; padding: 20px; text-align: center; }
     </style>
 </head>
 <body>
-    <h3 class="text-center text-danger">CHẾ ĐỘ SỬA LỖI (DEBUG MODE)</h3>
-    <p class="text-center">Hãy chụp ảnh màn hình phần chữ xanh bên dưới gửi cho mình nhé:</p>
-    
-    <div id="loading">Đang đọc file...</div>
-    <div id="debug-box" style="display:none"></div>
-    <div id="quiz-preview"></div>
+<div class="container py-5" style="max-width: 800px;">
+    <h1 class="text-center mb-5 fw-bold text-primary">ĐỀ KIỂM TRA TOÁN</h1>
+    <div id="loading" class="text-center text-muted">Đang xử lý dữ liệu...</div>
+    <div id="quiz-container"></div>
+</div>
 
 <script>
     const FILE_MD = 'ketqua.md';
 
-    async function debugQuiz() {
-        const debugBox = document.getElementById('debug-box');
+    // Hàm làm sạch văn bản (Xóa rác Pandoc)
+    function cleanMarkdown(text) {
+        if (!text) return "";
+        return text
+            .replace(/^[\s\t]*[>|]\s*/gm, '') // Xóa dấu > và | ở đầu dòng
+            .replace(/^\s*\+[-]+\+\s*$/gm, '') // Xóa dòng kẻ bảng +-----+
+            .replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1">') // Chuyển ảnh
+            .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>') // In đậm
+            .replace(/\*(.*?)\*/g, '<em>$1</em>'); // In nghiêng
+    }
+
+    async function loadQuiz() {
+        const container = document.getElementById('quiz-container');
+        const loading = document.getElementById('loading');
+        
         try {
             const res = await fetch(FILE_MD);
-            if (!res.ok) throw new Error("Không đọc được file (404)");
+            if (!res.ok) throw new Error(`Không đọc được file ${FILE_MD}`);
+            let text = await res.text();
             
-            const text = await res.text();
-            
-            // 1. HIỆN NGUYÊN HÌNH FILE MD ĐỂ KIỂM TRA
-            debugBox.style.display = 'block';
-            debugBox.textContent = "--- NỘI DUNG FILE CỦA BẠN (500 ký tự đầu) ---\n\n" + text.substring(0, 1000) + "\n\n... (còn tiếp)";
+            // Bước 1: Dọn rác toàn bộ file trước
+            text = cleanMarkdown(text);
 
-            // 2. THỬ TÁCH CÂU HỎI (TEST)
-            // Thử tìm xem dòng nào chứa "Câu" hoặc số "1."
-            const testMatch = text.match(/(?:^|\n)(.*?(?:Câu|Bài|1\.).*?)(?:\n|$)/);
-            if(testMatch) {
-                debugBox.textContent += "\n\n--- PHÁT HIỆN CẤU TRÚC ---\nDòng nghi vấn là câu hỏi:\n" + testMatch[1];
-            } else {
-                debugBox.textContent += "\n\n--- CẢNH BÁO ---\nKhông tìm thấy dấu hiệu 'Câu' hay 'Bài' hay số '1.' ở đầu dòng.";
+            // Bước 2: Tách câu hỏi bằng công nghệ mới
+            // Logic: Tìm dòng bắt đầu bằng số (1.), hoặc chữ Câu (Câu 1.), hoặc Bài (Bài 1.)
+            // Regex này cực mạnh, chấp nhận cả dấu * hoặc khoảng trắng thừa
+            const questionRegex = /(?:^|\n)\s*(?:(?:\*\*|__)?(?:Câu|Bài)\s+)?(\d+)[\.:]\s+/i;
+
+            const rawParts = text.split(questionRegex);
+            const questions = [];
+
+            // rawParts sẽ có dạng: [Intro, "1", "Nội dung câu 1...", "2", "Nội dung câu 2..."]
+            for (let i = 1; i < rawParts.length; i += 2) {
+                const qNum = rawParts[i]; 
+                const qBody = rawParts[i+1];
+                if(qBody) {
+                    questions.push({ num: qNum, text: qBody });
+                }
             }
 
+            if (questions.length === 0) {
+                throw new Error("Vẫn chưa tìm thấy câu hỏi. Có thể file MD quá lạ.");
+            }
+
+            loading.style.display = 'none';
+
+            // Bước 3: Hiển thị
+            questions.forEach((q, index) => {
+                const lines = q.text.trim().split('\n');
+                let content = "";
+                let options = [];
+                let solution = "";
+                let isSolution = false;
+
+                lines.forEach(line => {
+                    line = line.trim();
+                    if (!line) return;
+
+                    // Nhận diện Lời giải
+                    if (line.match(/^(?:Lời giải|Hướng dẫn)/i)) {
+                        isSolution = true;
+                        return; 
+                    }
+
+                    // Nhận diện Đáp án A. B. C. D. 
+                    // (Đã nâng cấp để nhận diện cả khi đáp án nằm trong thẻ in đậm **A.**)
+                    const optMatch = line.match(/^\s*(?:\*\*)?([A-D])(?:\.|:|\))(?:\*\*)?\s*(.*)/);
+                    if (!isSolution && optMatch) {
+                        // optMatch[1] là A,B,C... optMatch[2] là nội dung
+                        options.push({ label: optMatch[1], val: optMatch[2] });
+                    } 
+                    // Nội dung khác
+                    else {
+                        if (isSolution) solution += line + "<br>";
+                        else content += line + "<br>";
+                    }
+                });
+
+                // Render HTML
+                const card = document.createElement('div');
+                card.className = 'quiz-card';
+                card.innerHTML = `
+                    <div class="q-header">
+                        <div class="q-title">Câu ${q.num}</div>
+                        <div class="mt-2">${content}</div>
+                    </div>
+                    <div class="row">
+                        ${options.map(opt => {
+                            return `<div class="col-md-6">
+                                <button class="btn-option" onclick="showSol(this, ${index})">
+                                    <strong>${opt.label}.</strong> ${opt.val}
+                                </button>
+                            </div>`
+                        }).join('')}
+                    </div>
+                    <div id="sol-${index}" class="solution-area">
+                        <strong>💡 Hướng dẫn giải:</strong><br>${solution || 'Không có lời giải chi tiết.'}
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+            MathJax.typeset(); 
+
         } catch (err) {
-            debugBox.style.display = 'block';
-            debugBox.textContent = "LỖI: " + err.message;
+            loading.innerHTML = `<div class="error-msg">${err.message}</div>`;
         }
     }
-    debugQuiz();
+    
+    function showSol(btn, id) {
+        let parent = btn.closest('.row');
+        parent.querySelectorAll('.btn-option').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+        document.getElementById(`sol-${id}`).style.display = 'block';
+    }
+
+    loadQuiz();
 </script>
 </body>
 </html>
